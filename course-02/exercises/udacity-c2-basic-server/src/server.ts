@@ -70,13 +70,60 @@ import { Car, cars as cars_list } from './cars';
 
   // @TODO Add an endpoint to GET a list of cars
   // it should be filterable by make with a query paramater
+  // > try it {{host}}/cars
+  // > try it {{host}}/cars?make=toyota
+  app.get( "/cars",
+    ( req: Request, res: Response ) => {
+    let { make } = req.query;
+
+    if ( !make ) {
+      return res.status(200)
+                .send(cars);
+    }
+
+      return res.status(200)
+                .send(cars.filter(c => c.make === make))
+  } );
+
 
   // @TODO Add an endpoint to get a specific car
   // it should require id
   // it should fail gracefully if no matching car is found
+  // > try it {{host}}/cars/the_id
+  app.get( "/cars/:id",
+    ( req: Request, res: Response ) => {
+      let { id } = req.params;
+
+      let car = cars.filter(c => c.id == id)
+
+      if ( car.length ) {
+      return res.status(200)
+                .send(car)
+      }
+        return res.status(400)
+                  .send(`car does not exist`);
+  } );
+
 
   /// @TODO Add an endpoint to post a new car to our list
   // it should require id, type, model, and cost
+  // > try it by posting {"id": 10, "type": "mytype", "model": "mymodel", "cost": 123} as
+  // an application/json body to {{host}}/cars
+  app.post( "/cars",
+    async ( req: Request, res: Response ) => {
+
+      const { id, type, model, cost } = req.body;
+
+      if ( !id || !type || !model || !cost ) {
+        return res.status(400)
+                  .send(`all of id, type, model, cost are required`);
+      }
+
+      let car = { id: id, type: type, model: model, cost: cost}
+      return res.status(200)
+                .send(cars.concat(car));
+  } );
+
 
   // Start the Server
   app.listen( port, () => {
