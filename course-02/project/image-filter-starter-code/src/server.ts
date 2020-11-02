@@ -1,6 +1,7 @@
-import express from 'express';
 import bodyParser from 'body-parser';
-import { filterImageFromURL, deleteLocalFiles } from './util/util';
+import express from 'express';
+import Jimp from 'jimp';
+import { deleteLocalFiles } from './util/util';
 
 (async () => {
 
@@ -29,6 +30,62 @@ import { filterImageFromURL, deleteLocalFiles } from './util/util';
 
   /**************************************************************************** */
 
+  // I implement my own filterImageFromURL function, as the one provided in utils IMHO is buggy.
+  // The provided utils/filterImageFromURL does not handle any errors in Jimp.read,
+  // thus any error leads to a run-time "UnhandledPromiseRejectionWarning".
+  // This behavior is deprecated, leading to a warning of "[DEP0018] DeprecationWarning: Unhandled promise rejections
+  // are deprecated. In the future, promise rejections that are not handled will terminate the Node.js process with a
+  // non-zero exit code."
+  // The error is not catchable in a try/catch block.
+  // Rather than fixing the given utils/filterImageFromURL, I re-implement it via two functions 
+  // myFilterImageFromURL and writeImageToFile,
+  async function myFilterImageFromURL(inputURL: string): Promise<Jimp> {
+    return Jimp.read(inputURL)
+      .then((j: Jimp) => j.resize(256, 256))  // resize
+      .then((j: Jimp) => j.quality(60)) // set JPEG quality
+      .then((j: Jimp) => j.greyscale()) // set greyscale
+  }
+
+  async function writeImageToFile(jimp: Jimp): Promise<string> {
+    const outpath: string = __dirname + '/tmp/filtered.' + Math.floor(Math.random() * 2000) + '.jpg'
+    // const outpath: string = '/root/nonaccessiblepath.jpg' // simulate file error
+    return new Promise<string>((resolve, reject) =>
+      jimp.write(outpath, (err: Error) => {
+        if (err) reject(err)
+        else resolve(outpath)
+      })
+    )
+  }
+
+  async function deleteLocalFile(path: string): Promise<void> {
+    return deleteLocalFiles([path])
+      //.then(() => { throw new Error("simulate error during deletion") })
+      .then(
+        () => console.log("Deleted: " + path),
+        (reason) => console.log("Deleting: " + path + " failed with reason: " + reason)
+      )
+  }
+
+  app.get("/filteredimage", async (req, res) => {
+    const { image_url } = req.query
+    if (!image_url) {
+      console.log("Missing image_url parameter.")
+      res.status(400).send("Missing image_url parameter, try GET /filteredimage?image_url=...")
+    } else {
+      myFilterImageFromURL(image_url)
+        .then(writeImageToFile)
+        .then(
+          (path: string) => {
+            console.log("Sending image from path: " + path)
+            res.status(200).sendFile(path, () => deleteLocalFile(path))
+          },
+          (reason: any) => {
+            const errorMessage: string = "Filtering failed with this reason: " + reason
+            console.log(errorMessage)
+            res.status(422).send(errorMessage)
+          })
+    }
+  })
   //! END @TODO1
 
   // Root Endpoint
