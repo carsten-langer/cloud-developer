@@ -1,26 +1,24 @@
-service:
-  name: serverless-udagram-app
+service: serverless-udagram-app
 
 plugins:
   - serverless-webpack
-  - serverless-reqvalidator-plugin
-  - serverless-aws-documentation
 
 provider:
   name: aws
-  runtime: nodejs8.10
+  runtime: nodejs10.x
+  profile: serverless
 
   stage: ${opt:stage, 'dev'}
-  region: ${opt:region, 'us-east-1'}
+  region: ${opt:region, 'eu-central-1'}
 
   environment:
     GROUPS_TABLE: Groups-${self:provider.stage}
     IMAGES_TABLE: Images-${self:provider.stage}
     IMAGE_ID_INDEX: ImageIdIndex
     CONNECTIONS_TABLE: Connections-${self:provider.stage}
-    IMAGES_S3_BUCKET: serverless-udagram-images-${self:provider.stage}
+    IMAGES_S3_BUCKET: cdl-serverless-udagram-images-${self:provider.stage}
     SIGNED_URL_EXPIRATION: 300
-    THUMBNAILS_S3_BUCKET: serverless-udagram-thumbnail-${self:provider.stage}
+    THUMBNAILS_S3_BUCKET: cdl-serverless-udagram-thumbnail-${self:provider.stage}
     AUTH_0_SECRET_ID: Auth0Secret-${self:provider.stage}
     AUTH_0_SECRET_FIELD: auth0Secret
 
@@ -66,19 +64,6 @@ provider:
 
 custom:
   topicName: imagesTopic-${self:provider.stage}
-  documentation:
-    api:
-      info:
-        version: v1.0.0
-        title: Udagram API
-        description: Serverless application for images sharing
-    models:
-      - name: GroupRequest
-        contentType: application/json
-        schema: ${file(models/create-group-request.json)}
-      - name: ImageRequest
-        contentType: application/json
-        schema: ${file(models/create-image-request.json)}
 
 functions:
 
@@ -104,12 +89,10 @@ functions:
           path: groups
           cors: true
           authorizer: RS256Auth
-          reqValidatorName: RequestBodyValidator
-          documentation:
-            summary: Create a new group
-            description: Create a new group
-            requestModels:
-              'application/json': GroupRequest
+          request:
+            # Schema that will be used to validate incoming requests
+            schema:
+              application/json: ${file(models/create-group-request.json)}
 
   GetImages:
     handler: src/lambda/http/getImages.handler
@@ -127,15 +110,14 @@ functions:
           authorizer: RS256Auth
           path: groups/{groupId}/images
           cors: true
-          reqValidatorName: RequestBodyValidator
-          documentation:
-            summary: Create a new image
-            description: Create a new image
-            requestModels:
-              'application/json': ImageRequest
+          request:
+            # Schema that will be used to validate incoming requests
+            schema:
+              application/json: ${file(models/create-image-request.json)}
 
   SendUploadNotifications:
     environment:
+      REGION: ${self:provider.region}
       STAGE: ${self:provider.stage}
       API_ID:
         Ref: WebsocketsApi
@@ -176,6 +158,7 @@ functions:
       - websocket:
           route: $disconnect
 
+  # Uncomment if you want to enable Elasticsearch sync
   # SyncWithElasticsearch:
   #   environment:
   #     ES_ENDPOINT: !GetAtt ImagesSearch.DomainEndpoint
@@ -203,6 +186,8 @@ resources:
       Properties:
         AttributeDefinitions:
           - AttributeName: id
+            AttributeType: S
+          - AttributeName: user
             AttributeType: S
         KeySchema:
           - AttributeName: id
@@ -241,24 +226,13 @@ resources:
       Type: AWS::DynamoDB::Table
       Properties:
         AttributeDefinitions:
-          -
-            AttributeName: id
+          - AttributeName: id
             AttributeType: S
         KeySchema:
-          -
-            AttributeName: id
+          - AttributeName: id
             KeyType: HASH
         BillingMode: PAY_PER_REQUEST
         TableName: ${self:provider.environment.CONNECTIONS_TABLE}
-
-    RequestBodyValidator:
-      Type: AWS::ApiGateway::RequestValidator
-      Properties:
-        Name: 'request-body-validator'
-        RestApiId:
-          Ref: ApiGatewayRestApi
-        ValidateRequestBody: true
-        ValidateRequestParameters: false
 
     AttachmentsBucket:
       Type: AWS::S3::Bucket
@@ -271,8 +245,7 @@ resources:
               Topic: !Ref ImagesTopic
         CorsConfiguration:
           CorsRules:
-            -
-              AllowedOrigins:
+            - AllowedOrigins:
                 - '*'
               AllowedHeaders:
                 - '*'
@@ -327,6 +300,7 @@ resources:
         DisplayName: Image bucket topic
         TopicName: ${self:custom.topicName}
 
+    # Uncomment if you want to create Elasticsearch
     # ImagesSearch:
     #   Type: AWS::Elasticsearch::Domain
     #   Properties:
