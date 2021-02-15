@@ -1,17 +1,15 @@
-service:
-  name: serverless-udagram-app
+service: serverless-udagram-app
 
 plugins:
   - serverless-webpack
-  - serverless-reqvalidator-plugin
-  - serverless-aws-documentation
 
 provider:
   name: aws
-  runtime: nodejs8.10
+  runtime: nodejs10.x
+  profile: serverless
 
   stage: ${opt:stage, 'dev'}
-  region: ${opt:region, 'us-east-1'}
+  region: ${opt:region, 'eu-central-1'}
 
   environment:
     GROUPS_TABLE: Groups-${self:provider.stage}
@@ -28,6 +26,7 @@ provider:
     - Effect: Allow
       Action:
         - dynamodb:Query
+        - dynamodb:PutItem
       Resource: arn:aws:dynamodb:${self:provider.region}:*:table/${self:provider.environment.IMAGES_TABLE}
     - Effect: Allow
       Action:
@@ -63,12 +62,10 @@ functions:
           method: post
           path: groups
           cors: true
-          reqValidatorName: RequestBodyValidator
-          documentation:
-            summary: Create a new group
-            description: Create a new group
-            requestModels:
-              'application/json': GroupRequest
+          request:
+            # Schema that will be used to validate incoming requests
+            schema:
+              application/json: ${file(models/create-group-request.json)}
 
   GetImages:
     handler: src/lambda/http/getImages.handler
@@ -80,6 +77,15 @@ functions:
 
   CreateImage:
     handler: src/lambda/http/createImage.handler
+    events:
+      - http:
+          method: post
+          path: groups/{groupId}/images
+          cors: true
+          request:
+            # Schema that will be used to validate incoming requests
+            schema:
+              application/json: ${file(models/create-image-request.json)}
 
 resources:
   Resources:
@@ -119,13 +125,3 @@ resources:
               KeyType: HASH
             Projection:
               ProjectionType: ALL
-
-    RequestBodyValidator:
-      Type: AWS::ApiGateway::RequestValidator
-      Properties:
-        Name: 'request-body-validator'
-        RestApiId:
-          Ref: ApiGatewayRestApi
-        ValidateRequestBody: true
-        ValidateRequestParameters: false
-
