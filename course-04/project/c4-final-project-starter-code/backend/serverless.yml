@@ -1,5 +1,4 @@
-service:
-  name: serverless-todo-app
+service: serverless-todo-app
 
 plugins:
   - serverless-webpack
@@ -7,14 +6,22 @@ plugins:
 
 provider:
   name: aws
-  runtime: nodejs8.10
-
+  runtime: nodejs10.x
+  profile: serverless
   stage: ${opt:stage, 'dev'}
-  region: ${opt:region, 'us-east-1'}
+  region: ${opt:region, 'eu-central-1'}
+  lambdaHashingVersion: 20201221
+  apiGateway:
+    shouldStartNameWithService: true
+
+custom:
+  todosTable: todosTable-${self:provider.stage}
+  todosS3Bucket: cdl-todos-bucket-${self:provider.stage}
+  todosS3UrlExpirationSeconds: 300
 
 functions:
 
-  Auth:
+  RS256Auth:
     handler: src/lambda/auth/auth0Authorizer.handler
 
   # TODO: Configure this function
@@ -24,15 +31,35 @@ functions:
       - http:
           method: get
           path: todos
+          cors: true
+          authorizer: RS256Auth
+    environment:
+      TODOS_TABLE: ${self:custom.todosTable}
+    iamRoleStatements:
+      - Effect: Allow
+        Action:
+          - dynamodb:Query
+        Resource: arn:aws:dynamodb:${self:provider.region}:*:table/${self:custom.todosTable}
 
   # TODO: Configure this function
-  GetTodos:
   CreateTodo:
     handler: src/lambda/http/createTodo.handler
     events:
       - http:
           method: post
           path: todos
+          cors: true
+          authorizer: RS256Auth
+          request:
+            schema:
+              application/json: ${file(schemas/create-todo-request.json)}
+    environment:
+      TODOS_TABLE: ${self:custom.todosTable}
+    iamRoleStatements:
+      - Effect: Allow
+        Action:
+          - dynamodb:PutItem
+        Resource: arn:aws:dynamodb:${self:provider.region}:*:table/${self:custom.todosTable}
 
   # TODO: Configure this function
   UpdateTodo:
@@ -41,6 +68,18 @@ functions:
       - http:
           method: patch
           path: todos/{todoId}
+          cors: true
+          authorizer: RS256Auth
+          request:
+            schema:
+              application/json: ${file(schemas/update-todo-request.json)}
+    environment:
+      TODOS_TABLE: ${self:custom.todosTable}
+    iamRoleStatements:
+      - Effect: Allow
+        Action:
+          - dynamodb:UpdateItem
+        Resource: arn:aws:dynamodb:${self:provider.region}:*:table/${self:custom.todosTable}
 
   # TODO: Configure this function
   DeleteTodo:
@@ -49,6 +88,20 @@ functions:
       - http:
           method: delete
           path: todos/{todoId}
+          cors: true
+          authorizer: RS256Auth
+    environment:
+      TODOS_TABLE: ${self:custom.todosTable}
+      TODOS_S3_BUCKET: ${self:custom.todosS3Bucket}
+    iamRoleStatements:
+      - Effect: Allow
+        Action:
+          - dynamodb:DeleteItem
+        Resource: arn:aws:dynamodb:${self:provider.region}:*:table/${self:custom.todosTable}
+      - Effect: Allow
+        Action:
+          - s3:DeleteObject
+        Resource: arn:aws:s3:::${self:custom.todosS3Bucket}/*
 
   # TODO: Configure this function
   GenerateUploadUrl:
@@ -57,7 +110,82 @@ functions:
       - http:
           method: post
           path: todos/{todoId}/attachment
+          cors: true
+          authorizer: RS256Auth
+    environment:
+      TODOS_TABLE: ${self:custom.todosTable}
+      TODOS_S3_BUCKET: ${self:custom.todosS3Bucket}
+      TODOS_S3_SIGNED_URL_EXPIRATION: ${self:custom.todosS3UrlExpirationSeconds}
+    iamRoleStatements:
+      - Effect: Allow
+        Action:
+          - dynamodb:UpdateItem
+        Resource: arn:aws:dynamodb:${self:provider.region}:*:table/${self:custom.todosTable}
+      - Effect: Allow
+        Action:
+          - s3:PutObject
+        Resource: arn:aws:s3:::${self:custom.todosS3Bucket}/*
 
 resources:
   Resources:
     # TODO: Add any necessary AWS resources
+    GatewayResponseDefault4XX:
+      Type: AWS::ApiGateway::GatewayResponse
+      Properties:
+        ResponseParameters:
+          gatewayresponse.header.Access-Control-Allow-Origin: "'*'"
+          gatewayresponse.header.Access-Control-Allow-Headers: "'Content-Type,X-Amz-Date,Authorization,X-Api-Key,X-Amz-Security-Token'"
+          gatewayresponse.header.Access-Control-Allow-Methods: "'GET,OPTIONS,POST'"
+        ResponseType: DEFAULT_4XX
+        RestApiId:
+          Ref: ApiGatewayRestApi
+
+    TodosDynamoDBTable:
+      Type: "AWS::DynamoDB::Table"
+      Properties:
+        AttributeDefinitions:
+          - AttributeName: userId
+            AttributeType: S
+          - AttributeName: todoId
+            AttributeType: S
+        KeySchema:
+          - AttributeName: userId
+            KeyType: HASH
+          - AttributeName: todoId
+            KeyType: RANGE
+        BillingMode: PAY_PER_REQUEST
+        StreamSpecification:
+          StreamViewType: NEW_IMAGE
+        TableName: ${self:custom.todosTable}
+
+    TodosBucket:
+      Type: AWS::S3::Bucket
+      Properties:
+        BucketName: ${self:custom.todosS3Bucket}
+        CorsConfiguration:
+          CorsRules:
+            - AllowedOrigins:
+                - '*'
+              AllowedHeaders:
+                - '*'
+              AllowedMethods:
+                - GET
+                - PUT
+                - POST
+                - DELETE
+                - HEAD
+              MaxAge: 3000
+
+    BucketPolicy:
+      Type: AWS::S3::BucketPolicy
+      Properties:
+        PolicyDocument:
+          Id: MyPolicy
+          Version: "2012-10-17"
+          Statement:
+            - Sid: PublicReadForGetBucketObjects
+              Effect: Allow
+              Principal: '*'
+              Action: 's3:GetObject'
+              Resource: 'arn:aws:s3:::${self:custom.todosS3Bucket}/*'
+        Bucket: !Ref TodosBucket
