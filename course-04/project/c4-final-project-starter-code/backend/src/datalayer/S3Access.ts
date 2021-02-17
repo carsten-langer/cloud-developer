@@ -1,8 +1,8 @@
 import * as AWS from 'aws-sdk'
 import {createLogger} from "../utils/logger";
 
-//const AWSXRay = require('aws-xray-sdk')
-//const XAWS = AWSXRay.captureAWS(AWS)
+const AWSXRay = require('aws-xray-sdk')
+const XAWS = AWSXRay.captureAWS(AWS)
 const logger = createLogger('S3Access')
 const urlExpiration = process.env.TODOS_S3_SIGNED_URL_EXPIRATION
 const bucket = process.env.TODOS_S3_BUCKET
@@ -37,5 +37,5 @@ function createS3Client() {
     // if (process.env.IS_OFFLINE) {
     // ...
     // }
-    return new AWS.S3({signatureVersion: 'v4'})
+    return new XAWS.S3({signatureVersion: 'v4'})
 }
